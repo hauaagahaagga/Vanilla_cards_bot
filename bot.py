@@ -4,24 +4,17 @@ import logging
 import random
 import string
 from datetime import datetime, time
+from typing import Dict, List, Optional, Tuple
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Dict, List, Optional, Tuple
 
-from flask import Flask, request, Response, jsonify
+from flask import Flask, jsonify, request, Response
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import (
-    Application,
-    CommandHandler,
-    CallbackQueryHandler,
-    MessageHandler,
-    ContextTypes,
-    filters,
-)
+from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, filters, ContextTypes
 
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-    level=logging.INFO,
+    level=logging.INFO
 )
 logger = logging.getLogger(__name__)
 
@@ -30,13 +23,13 @@ WEBHOOK_BASE_URL = os.environ.get("WEBHOOK_BASE_URL", "").rstrip("/")
 PORT = int(os.environ.get("PORT", 8080))
 
 if not BOT_TOKEN:
-    raise RuntimeError("BOT_TOKEN environment variable is required")
+    raise RuntimeError("BOT_TOKEN environment variable is not set")
 
 if not WEBHOOK_BASE_URL:
-    raise RuntimeError("WEBHOOK_BASE_URL environment variable is required")
+    raise RuntimeError("WEBHOOK_BASE_URL environment variable is not set")
 
 app = Flask(__name__)
-telegram_app: Optional[Application] = None
+telegram_app = None
 
 CARD_BINS = {
     "USD": ["435880xx", "491277xx", "511332xx", "428313xx", "520356xx", "409758xx", "525362xx", "451129xx", "434340xx", "426370xx", "411810xx", "403446xx", "533621xx", "446317xx", "457824xx", "545660xx", "432465xx", "516612xx", "484718xx", "485246xx", "402372xx", "457851xx"],
@@ -53,7 +46,7 @@ FILTER_BIN_MAP = {
     "walmart": ["485246xx"],
     "giftcardmall": ["451129xx", "403446xx", "435880xx", "511332xx"],
     "joker": ["533985xx", "461126xx"],
-    "amex": ["373778xx", "377935xx", "375163xx"],
+    "amex": ["373778xx", "377935xx", "375163xx"]
 }
 
 class StickerType(Enum):
@@ -68,7 +61,7 @@ DEPOSIT_ADDRESSES = [
     "UQAZjMCIT6MEMUgvKmweTySPrGqxnUrgvG5JQVUfnR-d_tke",
     "UQBwwD_2VekRaM-7_6wwltzkboxbTiYDqif40G9Tbnq76Td1",
     "UQAMBt7k1FZHvewkpB1IHMLiOMLZR63rO_NKv-fiQ0n5EGW_",
-    "UQC9OvldFlHMbxKRq-6yRTm9uWv-YWFcsywHQAZz6p9dtonc",
+    "UQC9OvldFlHMbxKRq-6yRTm9uWv-YWFcsywHQAZz6p9dtonc"
 ]
 
 user_deposit_data = {}
@@ -109,21 +102,22 @@ class CardGenerator:
     def _generate_unique_number(self, existing_numbers: set) -> str:
         while True:
             bin_list = []
-            for _, bins in CARD_BINS.items():
+            for currency, bins in CARD_BINS.items():
                 bin_list.extend(bins)
             selected_bin = random.choice(bin_list)
-            random_suffix = "".join(random.choices(string.digits, k=2))
-            card_num = selected_bin.replace("xx", random_suffix)
+            random_suffix = ''.join(random.choices(string.digits, k=2))
+            card_num = selected_bin.replace('xx', random_suffix)
             if card_num not in existing_numbers:
                 return card_num
 
     def _get_max_amount_for_bin(self, card_number: str) -> float:
-        bin_prefix = card_number[:6] + "xx"
+        bin_prefix = card_number[:6] + 'xx'
         if bin_prefix in CAD_BINS:
             return 150.0
-        if bin_prefix in AUD_BINS:
+        elif bin_prefix in AUD_BINS:
             return 50.0
-        return 500.0
+        else:
+            return 500.0
 
     def _get_sticker_for_amount(self, amount: float) -> StickerType:
         if amount >= 300:
@@ -137,10 +131,11 @@ class CardGenerator:
             return StickerType.GOOGLE
         elif rand < 0.87:
             return StickerType.PAYPAL
-        return StickerType.GOOGLE
+        else:
+            return StickerType.GOOGLE
 
     def _get_currency_for_bin(self, card_number: str) -> str:
-        bin_prefix = card_number[:6] + "xx"
+        bin_prefix = card_number[:6] + 'xx'
         for currency, bins in CARD_BINS.items():
             if bin_prefix in bins:
                 return currency
@@ -158,49 +153,82 @@ class CardGenerator:
         aud_count = 0
         max_aud_cards = 20
 
-        def add_card(amount: float, force_high=False):
-            nonlocal aud_count
+        for _ in range(low_amount_count):
+            amount = round(random.uniform(0.01, 0.98), 2)
             while True:
                 card_num = self._generate_unique_number(existing_numbers)
                 if (card_num, amount) not in existing_pairs:
                     max_amt = self._get_max_amount_for_bin(card_num)
                     if amount <= max_amt:
-                        if card_num[:6] + "xx" in AUD_BINS and aud_count >= max_aud_cards:
+                        break
+            existing_numbers.add(card_num)
+            existing_pairs.add((card_num, amount))
+            currency = self._get_currency_for_bin(card_num)
+            sticker = self._get_sticker_for_amount(amount)
+            cards.append(Card(card_num, currency, amount, sticker))
+
+        for _ in range(high_amount_count):
+            amount = round(random.uniform(300, 500), 2)
+            while True:
+                card_num = self._generate_unique_number(existing_numbers)
+                if (card_num, amount) not in existing_pairs:
+                    max_amt = self._get_max_amount_for_bin(card_num)
+                    if amount <= max_amt:
+                        break
+            existing_numbers.add(card_num)
+            existing_pairs.add((card_num, amount))
+            currency = self._get_currency_for_bin(card_num)
+            cards.append(Card(card_num, currency, amount, StickerType.NONE))
+
+        for _ in range(medium_amount_count):
+            amount = round(random.uniform(5, 40), 2)
+            while True:
+                card_num = self._generate_unique_number(existing_numbers)
+                if (card_num, amount) not in existing_pairs:
+                    max_amt = self._get_max_amount_for_bin(card_num)
+                    if amount <= max_amt:
+                        if card_num[:6] + 'xx' in AUD_BINS and aud_count >= max_aud_cards:
                             continue
                         break
             existing_numbers.add(card_num)
             existing_pairs.add((card_num, amount))
-            if card_num[:6] + "xx" in AUD_BINS:
+            if card_num[:6] + 'xx' in AUD_BINS:
                 aud_count += 1
             currency = self._get_currency_for_bin(card_num)
-            sticker = StickerType.NONE if force_high else self._get_sticker_for_amount(amount)
+            sticker = self._get_sticker_for_amount(amount)
             cards.append(Card(card_num, currency, amount, sticker))
 
-        for _ in range(low_amount_count):
-            add_card(round(random.uniform(0.01, 0.98), 2))
-
-        for _ in range(high_amount_count):
-            add_card(round(random.uniform(300, 500), 2), force_high=True)
-
-        for _ in range(medium_amount_count):
-            add_card(round(random.uniform(5, 40), 2))
-
         for _ in range(remaining):
-            add_card(round(random.uniform(5, 40), 2))
+            amount = round(random.uniform(5, 40), 2)
+            while True:
+                card_num = self._generate_unique_number(existing_numbers)
+                if (card_num, amount) not in existing_pairs:
+                    max_amt = self._get_max_amount_for_bin(card_num)
+                    if amount <= max_amt:
+                        if card_num[:6] + 'xx' in AUD_BINS and aud_count >= max_aud_cards:
+                            continue
+                        break
+            existing_numbers.add(card_num)
+            existing_pairs.add((card_num, amount))
+            if card_num[:6] + 'xx' in AUD_BINS:
+                aud_count += 1
+            currency = self._get_currency_for_bin(card_num)
+            sticker = self._get_sticker_for_amount(amount)
+            cards.append(Card(card_num, currency, amount, sticker))
 
         cards.sort(key=lambda x: x.amount, reverse=True)
         unregistered_count = int(len(cards) * 0.2)
-        sorted_cards = sorted(cards, key=lambda x: x.amount, reverse=True)
+        cards_by_amount_desc = sorted(cards, key=lambda x: x.amount, reverse=True)
         for i in range(unregistered_count):
-            sorted_cards[len(sorted_cards) - 1 - i].is_registered = False
-        return sorted_cards
+            cards_by_amount_desc[len(cards_by_amount_desc) - 1 - i].is_registered = False
+        return cards
 
     async def update_cards(self):
         self._is_updating = True
         self.cards = self.generate_cards()
         self._last_update_time = datetime.now()
         self._is_updating = False
-        logger.info("Cards generated: %s", len(self.cards))
+        print(f"Cards generated: {len(self.cards)} cards")
 
     def mark_random_cards_out_of_stock(self, percentage: float = 1.0):
         available_cards = [c for c in self.cards if not c.is_out_of_stock]
@@ -211,7 +239,7 @@ class CardGenerator:
         selected = random.sample(available_cards, count)
         for card in selected:
             card.is_out_of_stock = True
-        logger.info("Marked %s cards as OUT OF STOCK", count)
+        print(f"Marked {count} cards as OUT OF STOCK")
         return count
 
     def get_cards_paginated(self, page: int, per_page: int = 10, filter_type: str = None) -> Tuple[List[Card], int]:
@@ -225,10 +253,7 @@ class CardGenerator:
                 filtered_cards = [c for c in filtered_cards if c.is_registered]
             elif filter_type in FILTER_BIN_MAP:
                 allowed_bins = FILTER_BIN_MAP[filter_type]
-                filtered_cards = [
-                    c for c in filtered_cards
-                    if any(c.card_number.startswith(bin_prefix.replace("xx", "")) for bin_prefix in allowed_bins)
-                ]
+                filtered_cards = [c for c in filtered_cards if any(c.card_number.startswith(bin_prefix.replace('xx', '')) for bin_prefix in allowed_bins)]
         total_pages = max(1, (len(filtered_cards) + per_page - 1) // per_page)
         start = (page - 1) * per_page
         end = start + per_page
@@ -253,8 +278,8 @@ class UserManager:
             self.users[user.id] = UserData(
                 user_id=user.id,
                 username=user.username or "",
-                first_name=user.first_name or "User",
-                referral_link=referral_link,
+                first_name=user.first_name,
+                referral_link=referral_link
             )
             if referrer_id and referrer_id != user.id and referrer_id in self.users:
                 self.users[user.id].referred_by = str(referrer_id)
@@ -274,9 +299,9 @@ class KeyboardBuilder:
             [
                 InlineKeyboardButton("💳 Stock", callback_data="stock"),
                 InlineKeyboardButton("📞 Contact Admin", url="https://t.me/Vanilagcm"),
-                InlineKeyboardButton("🔍 Card chake", url="https://t.me/card_chaker_bot"),
+                InlineKeyboardButton("🔍 Card chake", url="https://t.me/card_chaker_bot")
             ],
-            [InlineKeyboardButton("🆘 Refund support", url="https://t.me/VANILAExchange")],
+            [InlineKeyboardButton("🆘 Refund support", url="https://t.me/VANILAExchange")]
         ]
         return InlineKeyboardMarkup(keyboard)
 
@@ -287,23 +312,25 @@ class KeyboardBuilder:
             [InlineKeyboardButton("⚪ Vanilla", callback_data="filter_vanilla"), InlineKeyboardButton("💠 CardBalance", callback_data="filter_cardbalance")],
             [InlineKeyboardButton("☀️ Walmart", callback_data="filter_walmart"), InlineKeyboardButton("🛍️ GiftCardMall", callback_data="filter_giftcardmall")],
             [InlineKeyboardButton("🎭 Joker", callback_data="filter_joker"), InlineKeyboardButton("🟦 AMEX", callback_data="filter_amex")],
-            [InlineKeyboardButton("🏠 Clear Filters", callback_data="clear_filters")],
+            [InlineKeyboardButton("🏠 Clear Filters", callback_data="clear_filters")]
         ]
         return InlineKeyboardMarkup(keyboard)
 
     @staticmethod
     def get_deposit_keyboard() -> InlineKeyboardMarkup:
-        return InlineKeyboardMarkup([
+        keyboard = [
             [InlineKeyboardButton("Confirm ✅", callback_data="deposit_confirm")],
-            [InlineKeyboardButton("Cancel ⛔", callback_data="deposit_cancel")],
-        ])
+            [InlineKeyboardButton("Cancel ⛔", callback_data="deposit_cancel")]
+        ]
+        return InlineKeyboardMarkup(keyboard)
 
     @staticmethod
     def get_withdraw_keyboard() -> InlineKeyboardMarkup:
-        return InlineKeyboardMarkup([
+        keyboard = [
             [InlineKeyboardButton("Confirm ✅", callback_data="withdraw_confirm")],
-            [InlineKeyboardButton("Cancel ⛔", callback_data="withdraw_cancel")],
-        ])
+            [InlineKeyboardButton("Cancel ⛔", callback_data="withdraw_cancel")]
+        ]
+        return InlineKeyboardMarkup(keyboard)
 
 card_generator = CardGenerator()
 user_manager = UserManager()
@@ -313,7 +340,7 @@ def is_update_time() -> bool:
     now = datetime.now()
     return now.hour == 3 and now.minute < 10
 
-async def start_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     referrer_id = None
     if context.args and context.args[0].startswith("ref_"):
         try:
@@ -322,15 +349,37 @@ async def start_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
             pass
 
     user = user_manager.get_or_create_user(update, referrer_id)
+
     welcome_text = (
-        f"Welcome {user.first_name}!
+        f"⚡️Welcome {user.first_name} to Vanilla prepaid! ⚡️
 
 "
-        "Sell, Buy, and strike deals in seconds.
+        "Sell, Buy, and strike deals in seconds!!
 "
-        "Current rate is 37%."
+        "All transactions are secure and transparent.
+"
+        "All types of cards are available here at best rates. Current rate is 37%"
     )
     await update.message.reply_text(welcome_text, reply_markup=keyboard_builder.get_main_menu_keyboard())
+
+async def stock_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if is_update_time():
+        if update.callback_query:
+            await update.callback_query.answer("The bot is currently updating, please wait", show_alert=True)
+        else:
+            await update.message.reply_text("The bot is currently updating, please wait")
+        return
+
+    if not card_generator.cards:
+        await card_generator.update_cards()
+
+    cards, total_pages = card_generator.get_cards_paginated(1)
+
+    if not cards:
+        await update.message.reply_text("No cards available at the moment. Please try again later.")
+        return
+
+    await send_listing_page(update, context, cards, 1, total_pages)
 
 async def send_listing_page(update: Update, context: ContextTypes.DEFAULT_TYPE, cards: List[Card], page: int, total_pages: int, filter_type: str = None):
     if not cards:
@@ -341,18 +390,16 @@ async def send_listing_page(update: Update, context: ContextTypes.DEFAULT_TYPE, 
         return
 
     user = user_manager.get_or_create_user(update)
-    message_text = (
-        "Vanilla prepaid - Main Listings V2
+    message_text = "⚡️ Vanilla prepaid - Main Listings V2 ⚡️
 
 "
-        "Your Balance:
+    message_text += "Your Balance:
 "
-        f"USD: ${user.usd_balance:.2f}
+    message_text += f"💵 USD: ${user.usd_balance:.2f}
 "
-        f"TON: {user.ton_balance:.6f}
+    message_text += f"• TON : {user.ton_balance:.6f}
 
 "
-    )
 
     for i, card in enumerate(cards, 1):
         message_text += f"{i}. {card.card_number} {card.currency}${card.amount:.2f} at 37%"
@@ -364,6 +411,12 @@ async def send_listing_page(update: Update, context: ContextTypes.DEFAULT_TYPE, 
     total_balance = sum(c.amount for c in cards)
     message_text += f"
 Total Cards: {len(cards)} | Total Cards Balance: ${total_balance:.2f}
+"
+    message_text += "Legend:
+🔄 = Re-listed
+🅶 = Used on Google
+🅿 = Used on PayPal
+
 "
     message_text += f"Filters: {filter_type or 'None'}
 "
@@ -380,7 +433,7 @@ Total Cards: {len(cards)} | Total Cards Balance: ${total_balance:.2f}
 
         keyboard.append([
             InlineKeyboardButton(f"{i}. {card.card_number[:6]}xx", callback_data=f"card_{card.card_number}"),
-            InlineKeyboardButton(purchase_text, callback_data=callback_data),
+            InlineKeyboardButton(purchase_text, callback_data=callback_data)
         ])
 
     nav_buttons = []
@@ -394,111 +447,109 @@ Total Cards: {len(cards)} | Total Cards Balance: ${total_balance:.2f}
     keyboard.append([
         InlineKeyboardButton("💰 Deposit", callback_data="deposit"),
         InlineKeyboardButton("🔄 Refresh", callback_data=f"refresh_{page}_{filter_type or ''}"),
-        InlineKeyboardButton("🔍 Filters", callback_data="show_filters"),
+        InlineKeyboardButton("🔍 Filters", callback_data="show_filters")
     ])
 
     reply_markup = InlineKeyboardMarkup(keyboard)
+
     if update.callback_query:
         await update.callback_query.edit_message_text(message_text, reply_markup=reply_markup)
     else:
         await update.message.reply_text(message_text, reply_markup=reply_markup)
 
-async def stock_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if is_update_time():
-        msg = "The bot is currently updating, please wait"
-        if update.callback_query:
-            await update.callback_query.answer(msg, show_alert=True)
-        else:
-            await update.message.reply_text(msg)
-        return
-
-    if not card_generator.cards:
-        await card_generator.update_cards()
-
-    cards, total_pages = card_generator.get_cards_paginated(1)
-    if not cards:
-        await update.message.reply_text("No cards available at the moment. Please try again later.")
-        return
-    await send_listing_page(update, context, cards, 1, total_pages)
-
 async def deposit_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     selected_address = random.choice(DEPOSIT_ADDRESSES)
     user_id = update.effective_user.id
     user_deposit_data[user_id] = {
-        "address": selected_address,
-        "amount": None,
-        "txid": None,
-        "status": "waiting",
+        'address': selected_address,
+        'amount': None,
+        'txid': None,
+        'status': 'waiting'
     }
 
     message = (
-        f"TON DEPOSIT
+        f"⚡ Vanilla prepaid — TON DEPOSIT ⚡
 
 "
-        f"Deposit Information: {selected_address}
+        f"Deposit Information: `{selected_address}`
 
 "
-        "Minimum Deposit: 15 TON
+        "Minimum Deposit: `15 TON`
 "
-        "1. Send deposit.
+        "Instructions:
+"
+        "1. Send your deposit to the address above.
 "
         "2. Wait for 1 confirmation.
 "
-        "3. Balance updates automatically.
+        "3. Your balance will update automatically.
 "
-        "4. Send TON only through TON Network.
+        "4. Please remember to send TON only through the TON Network. ✅
 
 "
-        "This deposit session is active for 30 minutes."
+        "⚠️ WARNING:
+"
+        "- Deposits below the minimum amount will not be processed.
+"
+        "- This address is valid only for your account. Do not share it.
+
+"
+        "⚠️ Note: This deposit session is only active for 30 minutes."
     )
 
     if update.callback_query:
-        await update.callback_query.edit_message_text(message, reply_markup=keyboard_builder.get_deposit_keyboard())
+        await update.callback_query.edit_message_text(message, reply_markup=keyboard_builder.get_deposit_keyboard(), parse_mode='Markdown')
     else:
-        await update.message.reply_text(message, reply_markup=keyboard_builder.get_deposit_keyboard())
+        await update.message.reply_text(message, reply_markup=keyboard_builder.get_deposit_keyboard(), parse_mode='Markdown')
 
 async def deposit_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-    await query.edit_message_text("Please enter the amount.")
-    context.user_data["awaiting_deposit_amount"] = True
+    await query.edit_message_text("Please enter the amount.......")
+    context.user_data['awaiting_deposit_amount'] = True
 
 async def deposit_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
     await query.delete_message()
-    await update.effective_chat.send_message("Deposit request has been canceled.")
-    context.user_data.pop("awaiting_deposit_amount", None)
-    context.user_data.pop("awaiting_txid", None)
+    await update.effective_chat.send_message("Deposit request has been canceled.❌
+You can now create a new deposit request.✅")
+    context.user_data.pop('awaiting_deposit_amount', None)
+    context.user_data.pop('awaiting_txid', None)
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if context.user_data.get("awaiting_deposit_amount"):
+    if context.user_data.get('awaiting_deposit_amount'):
         try:
             amount = float(update.message.text.strip())
             if amount < 15:
-                await update.message.reply_text("Minimum deposit is 15 TON.")
+                await update.message.reply_text("Minimum deposit is 15 TON. Please enter the correct amount like 15, 16, 20")
                 return
+
             user_id = update.effective_user.id
             if user_id in user_deposit_data:
-                user_deposit_data[user_id]["amount"] = amount
-            context.user_data["awaiting_deposit_amount"] = False
-            context.user_data["awaiting_txid"] = True
+                user_deposit_data[user_id]['amount'] = amount
+
+            context.user_data['awaiting_deposit_amount'] = False
+            context.user_data['awaiting_txid'] = True
             await update.message.reply_text("Submit your Txid:")
+
         except ValueError:
             await update.message.reply_text("Please enter a valid number")
 
-    elif context.user_data.get("awaiting_txid"):
+    elif context.user_data.get('awaiting_txid'):
         txid = update.message.text.strip()
         user_id = update.effective_user.id
         user = user_manager.get_or_create_user(update)
+
         deposit_data = user_deposit_data.get(user_id, {})
-        amount = deposit_data.get("amount", 0)
+        amount = deposit_data.get('amount', 0)
         order_number = user_manager.get_next_order_number()
-        current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        context.user_data["awaiting_txid"] = False
+        current_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+
+        context.user_data['awaiting_txid'] = False
 
         order_text = (
-            f"ORDER DETAILS
+            f"⚡ ORDER DETAILS ⚡
 
 "
             f"NAME: {user.first_name}
@@ -516,10 +567,13 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"TIME: {current_time}
 
 "
-            "Balance will be added within 1/2 minutes."
+            "NOTE: Balance will be added within 1/2 minutes. If not added, contact customer care."
         )
-        keyboard = [[InlineKeyboardButton("Contact", url="https://t.me/Vanilagcm")]]
-        message = await update.message.reply_text(order_text, reply_markup=InlineKeyboardMarkup(keyboard))
+
+        keyboard = [[InlineKeyboardButton("✆ Contact", url="https://t.me/Vanilagcm")]]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+
+        message = await update.message.reply_text(order_text, reply_markup=reply_markup)
         asyncio.create_task(update_order_status(context, message.chat_id, message.message_id, order_text))
 
 async def update_order_status(context: ContextTypes.DEFAULT_TYPE, chat_id: int, message_id: int, original_text: str):
@@ -528,24 +582,25 @@ async def update_order_status(context: ContextTypes.DEFAULT_TYPE, chat_id: int, 
     try:
         await context.bot.edit_message_text(chat_id=chat_id, message_id=message_id, text=processing_text)
     except Exception as e:
-        logger.error("Error: %s", e)
+        logger.error(f"Error: {e}")
 
     await asyncio.sleep(55)
     failed_text = processing_text.replace("Stats: Processing....", "Stats: transaction could not be found.")
     try:
         await context.bot.edit_message_text(chat_id=chat_id, message_id=message_id, text=failed_text)
     except Exception as e:
-        logger.error("Error: %s", e)
+        logger.error(f"Error: {e}")
 
 async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     data = query.data
 
     if data.startswith("purchase_"):
-        await query.answer("Insufficient balance, please deposit", show_alert=True)
+        await query.answer("⚠ Insufficient balance, please deposit", show_alert=True)
         return
+
     if data.startswith("outofstock_"):
-        await query.answer("Sorry, the card is out of stock", show_alert=True)
+        await query.answer("Sorry, the card is out of stock ⚠", show_alert=True)
         return
 
     await query.answer()
@@ -609,32 +664,33 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.delete_message()
 
     elif data.startswith("card_"):
-        await query.answer(f"Copied: {data.replace('card_', '')}", show_alert=True)
+        card_num = data.replace("card_", "")
+        await query.answer(f"✅ Copied: {card_num}", show_alert=True)
 
 async def profile_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = user_manager.get_or_create_user(update)
     profile_text = (
-        f"PROFILE
+        f"⚡ Vanilla prepaid PROFILE ⚡
 
 "
-        f"{user.first_name}
+        f"👤 {user.first_name}
 "
-        f"ID: {user.user_id}
+        f"🆔 ID: {user.user_id}
 "
-        f"Username: @{user.username}
+        f"🔹 Username: @{user.username}
 "
-        f"TON Balance: {user.ton_balance:.10f}
+        f"💰 TON Balance: {user.ton_balance:.10f}
 "
-        f"USD Balance: ${user.usd_balance:.2f}
+        f"💵 USD Balance: ${user.usd_balance:.2f}
 
 "
-        f"Total Deposits: {user.total_deposits_ton:.4f} TON
+        f"📥 Total Deposits: {user.total_deposits_ton:.4f} TON
 "
-        f"Purchases: {user.purchase_count}
+        f"🛒 Purchases: {user.purchase_count}
 "
-        f"Referrals: {user.referrals_count}
+        f"👥 Referrals: {user.referrals_count}
 "
-        f"Referral Link: {user.referral_link}"
+        f"🔗 Referral Link: {user.referral_link}"
     )
     await update.message.reply_text(profile_text)
 
@@ -652,12 +708,14 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Contact: https://t.me/Vanilagcm")
 
 async def refund_rules_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Refund Policy: Contact support within 25 minutes of purchase.")
+    rules = "Refund Policy: Contact support within 25 minutes of purchase."
+    await update.message.reply_text(rules)
 
 async def ref_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = user_manager.get_or_create_user(update)
-    await update.message.reply_text(f"Your referral link: {user.referral_link}
-Total referrals: {user.referrals_count}")
+    text = f"Your referral link: {user.referral_link}
+Total referrals: {user.referrals_count}"
+    await update.message.reply_text(text)
 
 async def cents_listing(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if is_update_time():
@@ -672,48 +730,47 @@ async def scheduled_update(context: ContextTypes.DEFAULT_TYPE):
     await card_generator.update_cards()
 
 async def auto_mark_out_of_stock(context: ContextTypes.DEFAULT_TYPE):
-    if card_generator.cards:
-        card_generator.mark_random_cards_out_of_stock(1.0)
+    if not card_generator.cards:
+        return
+    card_generator.mark_random_cards_out_of_stock(1.0)
 
-async def post_init(app: Application):
+async def post_init(app_: Application):
     global telegram_app
-    telegram_app = app
+    telegram_app = app_
     await card_generator.update_cards()
     webhook_url = f"{WEBHOOK_BASE_URL}/telegram"
-    await app.bot.set_webhook(url=webhook_url, allowed_updates=Update.ALL_TYPES)
+    await app_.bot.set_webhook(url=webhook_url, allowed_updates=Update.ALL_TYPES)
     logger.info("Webhook set to %s", webhook_url)
-    if app.job_queue:
-        app.job_queue.run_repeating(auto_mark_out_of_stock, interval=3600, first=3600)
-        app.job_queue.run_daily(scheduled_update, time=time(hour=3, minute=0, second=0))
 
-@app.post("/telegram")
+    if app_.job_queue:
+        app_.job_queue.run_repeating(auto_mark_out_of_stock, interval=3600, first=3600)
+        app_.job_queue.run_daily(scheduled_update, time=time(hour=3, minute=0, second=0))
+
+@app.route("/")
+def home():
+    return jsonify({"status": "running", "message": "Bot is running!"})
+
+@app.route("/health")
+def health():
+    return "OK", 200
+
+@app.route("/telegram", methods=["POST"])
 async def telegram_webhook():
     if telegram_app is None:
-        return Response(status=503)
+        return Response("Bot not ready", status=503)
+
     data = request.get_json(force=True, silent=True)
     if not data:
-        return Response(status=400)
+        return Response("Bad request", status=400)
+
     update = Update.de_json(data, telegram_app.bot)
-    await telegram_app.update_queue.put(update)
-    return Response(status=200)
-
-@app.get("/health")
-def health():
-    return jsonify({"status": "ok", "message": "Bot is running"})
-
-@app.get("/")
-def home():
-    return jsonify({"status": "running"})
+    await telegram_app.process_update(update)
+    return Response("OK", status=200)
 
 async def main():
-    application = (
-        Application.builder()
-        .token(BOT_TOKEN)
-        .post_init(post_init)
-        .build()
-    )
+    application = Application.builder().token(BOT_TOKEN).post_init(post_init).build()
 
-    application.add_handler(CommandHandler("start", start_cmd))
+    application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("listings", stock_command))
     application.add_handler(CommandHandler("cents_listing", cents_listing))
     application.add_handler(CommandHandler("profile", profile_command))
