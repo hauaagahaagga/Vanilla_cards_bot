@@ -265,42 +265,38 @@ class UserManager:
 class KeyboardBuilder:
     @staticmethod
     def get_main_menu_keyboard() -> InlineKeyboardMarkup:
-        keyboard = [
+        return InlineKeyboardMarkup([
             [
                 InlineKeyboardButton("💳 Stock", callback_data="stock"),
                 InlineKeyboardButton("📞 Contact Admin", url="https://t.me/Vanilagcm"),
                 InlineKeyboardButton("🔍 Card chake", url="https://t.me/card_chaker_bot")
             ],
             [InlineKeyboardButton("🆘 Refund support", url="https://t.me/VANILAExchange")]
-        ]
-        return InlineKeyboardMarkup(keyboard)
+        ])
 
     @staticmethod
     def get_filters_keyboard() -> InlineKeyboardMarkup:
-        keyboard = [
+        return InlineKeyboardMarkup([
             [InlineKeyboardButton("🔐 Unregistered", callback_data="filter_unregistered"), InlineKeyboardButton("🔓 Registered", callback_data="filter_registered")],
             [InlineKeyboardButton("⚪ Vanilla", callback_data="filter_vanilla"), InlineKeyboardButton("💠 CardBalance", callback_data="filter_cardbalance")],
             [InlineKeyboardButton("☀️ Walmart", callback_data="filter_walmart"), InlineKeyboardButton("🛍️ GiftCardMall", callback_data="filter_giftcardmall")],
             [InlineKeyboardButton("🎭 Joker", callback_data="filter_joker"), InlineKeyboardButton("🟦 AMEX", callback_data="filter_amex")],
             [InlineKeyboardButton("🏠 Clear Filters", callback_data="clear_filters")]
-        ]
-        return InlineKeyboardMarkup(keyboard)
+        ])
 
     @staticmethod
     def get_deposit_keyboard() -> InlineKeyboardMarkup:
-        keyboard = [
+        return InlineKeyboardMarkup([
             [InlineKeyboardButton("Confirm ✅", callback_data="deposit_confirm")],
             [InlineKeyboardButton("Cancel ⛔", callback_data="deposit_cancel")]
-        ]
-        return InlineKeyboardMarkup(keyboard)
+        ])
 
     @staticmethod
     def get_withdraw_keyboard() -> InlineKeyboardMarkup:
-        keyboard = [
+        return InlineKeyboardMarkup([
             [InlineKeyboardButton("Confirm ✅", callback_data="withdraw_confirm")],
             [InlineKeyboardButton("Cancel ⛔", callback_data="withdraw_cancel")]
-        ]
-        return InlineKeyboardMarkup(keyboard)
+        ])
 
 card_generator = CardGenerator()
 user_manager = UserManager()
@@ -535,14 +531,14 @@ async def update_order_status(context: ContextTypes.DEFAULT_TYPE, chat_id: int, 
     try:
         await context.bot.edit_message_text(chat_id=chat_id, message_id=message_id, text=processing_text)
     except Exception as e:
-        logger.error(f"Error: {e}")
+        logger.error("Error: %s", e)
 
     await asyncio.sleep(55)
     failed_text = processing_text.replace("Stats: Processing....", "Stats: transaction could not be found.")
     try:
         await context.bot.edit_message_text(chat_id=chat_id, message_id=message_id, text=failed_text)
     except Exception as e:
-        logger.error(f"Error: {e}")
+        logger.error("Error: %s", e)
 
 async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -661,8 +657,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Contact: https://t.me/Vanilagcm")
 
 async def refund_rules_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    rules = "Refund Policy: Contact support within 25 minutes of purchase."
-    await update.message.reply_text(rules)
+    await update.message.reply_text("Refund Policy: Contact support within 25 minutes of purchase.")
 
 async def ref_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = user_manager.get_or_create_user(update)
