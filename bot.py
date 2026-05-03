@@ -102,7 +102,7 @@ class CardGenerator:
     def _generate_unique_number(self, existing_numbers: set) -> str:
         while True:
             bin_list = []
-            for currency, bins in CARD_BINS.items():
+            for _, bins in CARD_BINS.items():
                 bin_list.extend(bins)
             selected_bin = random.choice(bin_list)
             random_suffix = ''.join(random.choices(string.digits, k=2))
@@ -153,82 +153,49 @@ class CardGenerator:
         aud_count = 0
         max_aud_cards = 20
 
-        for _ in range(low_amount_count):
-            amount = round(random.uniform(0.01, 0.98), 2)
+        def add_card(amount: float, force_high: bool = False):
+            nonlocal aud_count
             while True:
                 card_num = self._generate_unique_number(existing_numbers)
                 if (card_num, amount) not in existing_pairs:
                     max_amt = self._get_max_amount_for_bin(card_num)
                     if amount <= max_amt:
+                        if card_num[:6] + 'xx' in AUD_BINS and aud_count >= max_aud_cards:
+                            continue
                         break
             existing_numbers.add(card_num)
             existing_pairs.add((card_num, amount))
+            if card_num[:6] + 'xx' in AUD_BINS:
+                aud_count += 1
             currency = self._get_currency_for_bin(card_num)
-            sticker = self._get_sticker_for_amount(amount)
+            sticker = StickerType.NONE if force_high else self._get_sticker_for_amount(amount)
             cards.append(Card(card_num, currency, amount, sticker))
+
+        for _ in range(low_amount_count):
+            add_card(round(random.uniform(0.01, 0.98), 2))
 
         for _ in range(high_amount_count):
-            amount = round(random.uniform(300, 500), 2)
-            while True:
-                card_num = self._generate_unique_number(existing_numbers)
-                if (card_num, amount) not in existing_pairs:
-                    max_amt = self._get_max_amount_for_bin(card_num)
-                    if amount <= max_amt:
-                        break
-            existing_numbers.add(card_num)
-            existing_pairs.add((card_num, amount))
-            currency = self._get_currency_for_bin(card_num)
-            cards.append(Card(card_num, currency, amount, StickerType.NONE))
+            add_card(round(random.uniform(300, 500), 2), force_high=True)
 
         for _ in range(medium_amount_count):
-            amount = round(random.uniform(5, 40), 2)
-            while True:
-                card_num = self._generate_unique_number(existing_numbers)
-                if (card_num, amount) not in existing_pairs:
-                    max_amt = self._get_max_amount_for_bin(card_num)
-                    if amount <= max_amt:
-                        if card_num[:6] + 'xx' in AUD_BINS and aud_count >= max_aud_cards:
-                            continue
-                        break
-            existing_numbers.add(card_num)
-            existing_pairs.add((card_num, amount))
-            if card_num[:6] + 'xx' in AUD_BINS:
-                aud_count += 1
-            currency = self._get_currency_for_bin(card_num)
-            sticker = self._get_sticker_for_amount(amount)
-            cards.append(Card(card_num, currency, amount, sticker))
+            add_card(round(random.uniform(5, 40), 2))
 
         for _ in range(remaining):
-            amount = round(random.uniform(5, 40), 2)
-            while True:
-                card_num = self._generate_unique_number(existing_numbers)
-                if (card_num, amount) not in existing_pairs:
-                    max_amt = self._get_max_amount_for_bin(card_num)
-                    if amount <= max_amt:
-                        if card_num[:6] + 'xx' in AUD_BINS and aud_count >= max_aud_cards:
-                            continue
-                        break
-            existing_numbers.add(card_num)
-            existing_pairs.add((card_num, amount))
-            if card_num[:6] + 'xx' in AUD_BINS:
-                aud_count += 1
-            currency = self._get_currency_for_bin(card_num)
-            sticker = self._get_sticker_for_amount(amount)
-            cards.append(Card(card_num, currency, amount, sticker))
+            add_card(round(random.uniform(5, 40), 2))
 
         cards.sort(key=lambda x: x.amount, reverse=True)
         unregistered_count = int(len(cards) * 0.2)
         cards_by_amount_desc = sorted(cards, key=lambda x: x.amount, reverse=True)
         for i in range(unregistered_count):
             cards_by_amount_desc[len(cards_by_amount_desc) - 1 - i].is_registered = False
-        return cards
+        return cards_by_amount_desc
 
     async def update_cards(self):
         self._is_updating = True
         self.cards = self.generate_cards()
         self._last_update_time = datetime.now()
         self._is_updating = False
-        print(f"Cards generated: {len(self.cards)} cards")
+        logger.info("Cards generated: %s cards", len(self.cards))
 
     def mark_random_cards_out_of_stock(self, percentage: float = 1.0):
         available_cards = [c for c in self.cards if not c.is_out_of_stock]
@@ -239,7 +206,7 @@ class CardGenerator:
         selected = random.sample(available_cards, count)
         for card in selected:
             card.is_out_of_stock = True
-        print(f"Marked {count} cards as OUT OF STOCK")
+        logger.info("Marked %s cards as OUT OF STOCK", count)
         return count
 
     def get_cards_paginated(self, page: int, per_page: int = 10, filter_type: str = None) -> Tuple[List[Card], int]:
@@ -253,7 +220,10 @@ class CardGenerator:
                 filtered_cards = [c for c in filtered_cards if c.is_registered]
             elif filter_type in FILTER_BIN_MAP:
                 allowed_bins = FILTER_BIN_MAP[filter_type]
-                filtered_cards = [c for c in filtered_cards if any(c.card_number.startswith(bin_prefix.replace('xx', '')) for bin_prefix in allowed_bins)]
+                filtered_cards = [
+                    c for c in filtered_cards
+                    if any(c.card_number.startswith(bin_prefix.replace('xx', '')) for bin_prefix in allowed_bins)
+                ]
         total_pages = max(1, (len(filtered_cards) + per_page - 1) // per_page)
         start = (page - 1) * per_page
         end = start + per_page
@@ -278,7 +248,7 @@ class UserManager:
             self.users[user.id] = UserData(
                 user_id=user.id,
                 username=user.username or "",
-                first_name=user.first_name,
+                first_name=user.first_name or "User",
                 referral_link=referral_link
             )
             if referrer_id and referrer_id != user.id and referrer_id in self.users:
@@ -362,25 +332,6 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     await update.message.reply_text(welcome_text, reply_markup=keyboard_builder.get_main_menu_keyboard())
 
-async def stock_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if is_update_time():
-        if update.callback_query:
-            await update.callback_query.answer("The bot is currently updating, please wait", show_alert=True)
-        else:
-            await update.message.reply_text("The bot is currently updating, please wait")
-        return
-
-    if not card_generator.cards:
-        await card_generator.update_cards()
-
-    cards, total_pages = card_generator.get_cards_paginated(1)
-
-    if not cards:
-        await update.message.reply_text("No cards available at the moment. Please try again later.")
-        return
-
-    await send_listing_page(update, context, cards, 1, total_pages)
-
 async def send_listing_page(update: Update, context: ContextTypes.DEFAULT_TYPE, cards: List[Card], page: int, total_pages: int, filter_type: str = None):
     if not cards:
         if update.callback_query:
@@ -390,16 +341,18 @@ async def send_listing_page(update: Update, context: ContextTypes.DEFAULT_TYPE, 
         return
 
     user = user_manager.get_or_create_user(update)
-    message_text = "⚡️ Vanilla prepaid - Main Listings V2 ⚡️
+    message_text = (
+        "⚡️ Vanilla prepaid - Main Listings V2 ⚡️
 
 "
-    message_text += "Your Balance:
+        "Your Balance:
 "
-    message_text += f"💵 USD: ${user.usd_balance:.2f}
+        f"💵 USD: ${user.usd_balance:.2f}
 "
-    message_text += f"• TON : {user.ton_balance:.6f}
+        f"• TON : {user.ton_balance:.6f}
 
 "
+    )
 
     for i, card in enumerate(cards, 1):
         message_text += f"{i}. {card.card_number} {card.currency}${card.amount:.2f} at 37%"
@@ -730,9 +683,8 @@ async def scheduled_update(context: ContextTypes.DEFAULT_TYPE):
     await card_generator.update_cards()
 
 async def auto_mark_out_of_stock(context: ContextTypes.DEFAULT_TYPE):
-    if not card_generator.cards:
-        return
-    card_generator.mark_random_cards_out_of_stock(1.0)
+    if card_generator.cards:
+        card_generator.mark_random_cards_out_of_stock(1.0)
 
 async def post_init(app_: Application):
     global telegram_app
